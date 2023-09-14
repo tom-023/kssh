@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# Usage: See --help.
+#
+# Installation
+#
+# 1. Install the script
+#   curl -L "https://raw.githubusercontent.com/tom-023/kssh/main/kssh" -o kssh
+#
+# 2. Make the script executable
+#   chmod u+x kssh
+#
+# 3. (Optional) Move the script to a directory in your PATH to make it globally accessible
+#   sudo mv kssh /usr/local/bin/
+
+set -eu
+
+colorEcho(){
+  red='\033[0;31m'
+  green='\033[0;32m'
+  yellow='\033[0;33m'
+  reset='\033[0m'
+
+  if echo $@ | egrep -q "prd|prod|production"; then
+    color=$red
+  elif echo $@ | egrep -q "stg|stage|staging|beta|devo"; then
+    color=$yellow
+  else
+    color=$green
+  fi
+
+  echo -e "${color}$@${reset}"
+}
+
+echo_stderr() {
+  echo -e "$@" >&2
+}
+
+die() {
+  echo_stderr "$@"
+  exit 1
+}
+
+validatePrereq() {
+  command -v kubectl &>/dev/null || die "kubectl not installed on host. Please install kubectl."
+  command -v peco  &>/dev/null || die "peco not installed on host. Please install peco. See https://github.com/peco/peco#installation"
+}
+
+function print_help() {
+  cat >&2 <<-END
+
+This script simplifies the process of accessing a Kubernetes pod.
+
+Example:
+
+./kssh
+
+The default command executed on the selected container is user-input.
+You need kubectl access to the desired cluster, otherwise, the script will crash.
+
+END
+}
+
+main(){
+  while [[ "$#" -gt 0 ]]; do
+    case $1 in
+      -h|--help)
+        print_help
+        exit
+        ;;
+      *)
+        die "Unknown param $1"
+        ;;
+    esac
+  done
+
+  date
+
+  echo_stderr "Validating pre-requisites...."
+  validatePrereq
+
+  echo_stderr "Select context."
+  context=$(kubectl config get-contexts -o name | peco --on-cancel=error --select-1 --prompt="Context:")
+  colorEcho "Selected context: $context"
+  kubectl config use-context $context
+  echo_stderr
+
+  echo_stderr "Select namespace."
+  namespace=$(kubectl get ns | tail -n +2 | awk '{print $1}' | peco --on-cancel=error --select-1 --prompt="Namespace:")
+  colorEcho Namespace: $namespace
+  echo_stderr
+
+  echo_stderr "Select pod."
+  pod=$(kubectl get pods -n $namespace | tail -n +2 | awk '{print $1}' | peco --on-cancel=error --select-1 --prompt="Pod:")
+  colorEcho Pod: $pod
+  echo_stderr
+
+  echo_stderr "Select container."
+  container=$(kubectl get pods $pod -n $namespace -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n' | peco --on-cancel=error --select-1 --prompt="Container:")
+  colorEcho Container: $container
+  echo_stderr
+
+  echo_stderr "Enter your command:"
+  read userCommand
+
+  cmd="kubectl exec -it $pod -n $namespace -c $container -- $userCommand"
+
+  colorEcho $cmd
+  $cmd
+}
+
+# Execute main function and pass all params over
+main $@
