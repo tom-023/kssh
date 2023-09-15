@@ -14,3 +14,9 @@
 
 ### 3. (Optional) Move the script to a directory in your PATH to make it globally accessible
     sudo mv kssh /usr/local/bin/
+
+## Usage
+
+```shell
+kssh
+```
